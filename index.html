@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>🐔 Chicken Invaders: Pi Edition</title>
+<script src="https://sdk.minepi.com/pi-sdk.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -64,6 +65,15 @@ body{background:var(--pi-deeper);font-family:'Rajdhani',sans-serif;display:flex;
 .boss-hp-label{font-family:'Orbitron',monospace;font-size:9px;color:#ff3355;letter-spacing:2px;text-align:center;margin-bottom:3px}
 .boss-hp-track{height:8px;background:rgba(255,51,85,.15);border-radius:4px;border:1px solid rgba(255,51,85,.3);overflow:hidden}
 .boss-hp-fill{height:100%;background:linear-gradient(90deg,#ff3355,#ff8800);border-radius:4px;transition:width .2s;box-shadow:0 0 8px rgba(255,51,85,.6)}
+/* Pi Auth */
+#pi-auth-overlay{position:absolute;inset:0;border-radius:16px;background:radial-gradient(ellipse at center,rgba(60,0,100,.97) 0%,rgba(5,0,20,.99) 100%);z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 24px;text-align:center}
+#pi-auth-overlay.hidden{display:none}
+.pi-auth-title{font-family:'Orbitron',monospace;font-size:22px;font-weight:900;color:var(--pi-gold);text-shadow:0 0 20px rgba(240,192,64,.7);margin:16px 0 6px}
+.pi-auth-sub{font-size:13px;color:rgba(200,160,255,.7);letter-spacing:2px;margin-bottom:24px}
+.pi-user-badge{background:linear-gradient(135deg,rgba(240,192,64,.15),rgba(255,140,0,.1));border:1px solid rgba(240,192,64,.4);border-radius:10px;padding:10px 20px;margin-bottom:18px;font-family:'Orbitron',monospace;font-size:13px;color:var(--pi-gold)}
+.pi-auth-status{font-size:11px;color:rgba(200,160,255,.5);margin-top:12px;letter-spacing:1px;min-height:16px}
+#pi-user-info{position:absolute;top:14px;left:50%;transform:translateX(-50%);font-family:'Orbitron',monospace;font-size:9px;color:var(--pi-gold);letter-spacing:1px;pointer-events:none;z-index:12;opacity:0;transition:opacity .4s;white-space:nowrap}
+#pi-user-info.show{opacity:1}
 </style>
 </head>
 <body>
@@ -208,9 +218,114 @@ body{background:var(--pi-deeper);font-family:'Rajdhani',sans-serif;display:flex;
     <button class="btn-primary" onclick="startGame()">▶ PLAY AGAIN</button>
     <button class="btn-secondary" onclick="showStart()">MAIN MENU</button>
   </div>
+
+  <!-- Pi Auth Overlay -->
+  <div id="pi-auth-overlay">
+    <div style="font-size:64px;animation:float 3s ease-in-out infinite;filter:drop-shadow(0 0 20px rgba(240,192,64,.6))">π</div>
+    <div class="pi-auth-title">CHICKEN INVADERS</div>
+    <div class="pi-auth-sub">Pi Network Edition</div>
+    <div id="pi-user-badge-wrap" class="pi-user-badge" style="display:none">
+      👤 <span id="pi-username-display">-</span>
+    </div>
+    <button class="btn-primary" id="pi-signin-btn" onclick="piAuthenticate()">
+      π &nbsp;SIGN IN WITH PI
+    </button>
+    <button class="btn-secondary" id="pi-continue-btn" style="display:none" onclick="dismissAuthOverlay()">
+      ▶ CONTINUE TO GAME
+    </button>
+    <div class="pi-auth-status" id="pi-auth-status">Connecting to Pi Network…</div>
+  </div>
+
+  <!-- Logged-in Pi user indicator (in-game) -->
+  <div id="pi-user-info"></div>
+
 </div>
 
 <script>
+// ══════════════════════════════════════════════════════
+//  PI NETWORK AUTHENTICATION
+// ══════════════════════════════════════════════════════
+let piUser = null;
+
+async function piInit() {
+  const statusEl = document.getElementById('pi-auth-status');
+  try {
+    // Pi.init returns a Promise — await it fully
+    await Pi.init({ version: '2.0', sandbox: true });
+    statusEl.textContent = 'Pi SDK ready. Sign in to continue.';
+    document.getElementById('pi-signin-btn').style.display = '';
+    // Auto-trigger auth
+    await piAuthenticate();
+  } catch (err) {
+    statusEl.textContent = 'Pi SDK unavailable (running outside Pi Browser?)';
+    document.getElementById('pi-signin-btn').style.display = '';
+    document.getElementById('pi-continue-btn').style.display = '';
+    console.warn('Pi SDK init failed:', err);
+  }
+}
+
+async function piAuthenticate() {
+  const statusEl = document.getElementById('pi-auth-status');
+  const signinBtn = document.getElementById('pi-signin-btn');
+  signinBtn.disabled = true;
+  statusEl.textContent = 'Authenticating with Pi…';
+  try {
+    const authResult = await Pi.authenticate(['username'], onIncompletePaymentFound);
+    const accessToken = authResult.accessToken;
+    statusEl.textContent = 'Verifying with Pi server…';
+    // Validate token by calling Pi's /v2/me endpoint
+    const res = await fetch('https://api.minepi.com/v2/me', {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    if (!res.ok) throw new Error('Token validation failed: ' + res.status);
+    const userData = await res.json();
+    piUser = userData;
+    onPiAuthSuccess(userData);
+  } catch (err) {
+    statusEl.textContent = 'Sign-in failed. Tap to retry.';
+    signinBtn.disabled = false;
+    console.warn('Pi auth error:', err);
+    // Still allow playing if auth fails (graceful degradation)
+    document.getElementById('pi-continue-btn').style.display = '';
+  }
+}
+
+function onIncompletePaymentFound(payment) {
+  // Handle any incomplete payments — required callback
+  console.log('Incomplete payment found:', payment);
+}
+
+function onPiAuthSuccess(user) {
+  const name = user.username || 'Pioneer';
+  // Show username in overlay
+  document.getElementById('pi-username-display').textContent = name;
+  document.getElementById('pi-user-badge-wrap').style.display = 'block';
+  document.getElementById('pi-signin-btn').style.display = 'none';
+  document.getElementById('pi-continue-btn').style.display = '';
+  document.getElementById('pi-auth-status').textContent = '✓ Authenticated as @' + name;
+  // Show in-game badge
+  const badge = document.getElementById('pi-user-info');
+  badge.textContent = '👤 @' + name;
+  badge.classList.add('show');
+  // Auto-dismiss after short delay
+  setTimeout(dismissAuthOverlay, 1800);
+}
+
+function dismissAuthOverlay() {
+  document.getElementById('pi-auth-overlay').classList.add('hidden');
+}
+
+// Boot Pi auth on load
+window.addEventListener('load', () => {
+  if (typeof Pi !== 'undefined') {
+    piInit();
+  } else {
+    document.getElementById('pi-auth-status').textContent = 'Pi Browser not detected. Playing in guest mode.';
+    document.getElementById('pi-signin-btn').textContent = 'π  RETRY PI AUTH';
+    document.getElementById('pi-continue-btn').style.display = '';
+  }
+});
+
 // ══════════════════════════════════════════════════════
 //  CANVAS & CONSTANTS
 // ══════════════════════════════════════════════════════
@@ -257,6 +372,7 @@ let powerupMeter=0, shieldActive=false, shieldTimer=0;
 let keys={}, animId, waveAnnounceTimer=0, totalWavesCleared=0;
 let paused = false;
 let bossActive = false, bossPhase = 0;
+let waveTransitioning = false; // prevent multi-fire of wave clear
 
 // Parallax layers
 const starLayers = [
@@ -958,13 +1074,14 @@ function update() {
   // Wave clear check
   const aliveChickens=chickens.filter(c=>c.active).length;
   const bossCleared=bossActive?(boss&&!boss.active):true;
-  if(aliveChickens===0 && bossCleared && gameState==='playing') {
+  if(aliveChickens===0 && bossCleared && gameState==='playing' && !waveTransitioning) {
+    waveTransitioning=true;
     wave++; document.getElementById('hud-wave').textContent=wave;
     totalWavesCleared++;
     if(wave>MAX_WAVES) {
-      if(!bossActive) setTimeout(winGame,600);
+      setTimeout(winGame,600);
     } else {
-      setTimeout(()=>{createWave(wave);announceWave(wave);},1400);
+      setTimeout(()=>{createWave(wave);announceWave(wave);waveTransitioning=false;},1400);
     }
   }
 }
@@ -1063,7 +1180,7 @@ function startGame() {
   hideAllScreens();
   gameState='playing'; paused=false;
   score=0; wave=1; lives=3; bombs=3; combo=0;
-  powerupMeter=0; totalWavesCleared=0;
+  powerupMeter=0; totalWavesCleared=0; waveTransitioning=false;
   shieldActive=false; shieldTimer=0; bossActive=false; boss=null;
   player.x=W/2; player.y=H-140; player.fireRate=8; player.invincible=0;
   bullets=[]; eggs=[]; particles=[]; powerups=[]; explosions=[]; floatingTexts=[];
