@@ -373,7 +373,6 @@ function drawChickenSprite(c2,type,w,hitFlash,hpRatio){
   const wingC=type==='boss'?'#7a3a12':type==='tank'?'#5a2a08':type==='red'?'#991800':'#c8a850';
   const combC='#dd2200';
   const legC='#ffaa00';
-  if(hitFlash)c2.filter='brightness(3.5) saturate(0)';
 
   // legs
   c2.strokeStyle=legC;c2.lineWidth=2.2*s;c2.lineCap='round';
@@ -422,8 +421,6 @@ function drawChickenSprite(c2,type,w,hitFlash,hpRatio){
     c2.strokeRect(-11*s,-5*s,22*s,16*s);c2.globalAlpha=1;
   }
 
-  c2.filter='none';
-
   // HP bar — always visible, above the sprite
   const bw=w*1.3, bh=5;
   const barY = -26*s; // above head
@@ -459,9 +456,7 @@ function drawBoss(){
   aura.addColorStop(0,`hsla(${aHue},100%,55%,.2)`);aura.addColorStop(1,`hsla(${aHue},100%,40%,0)`);
   ctx.fillStyle=aura;ctx.beginPath();ctx.arc(0,0,b.w*.9,0,Math.PI*2);ctx.fill();
 
-  if(b.hitFlash>0)ctx.filter='brightness(5) saturate(0)';
   drawChickenSprite(ctx,'boss',b.w,false,hp01);
-  ctx.filter='none';
 
   // crown
   const cw=b.w*.6;
