@@ -321,114 +321,6 @@ function sfxBoss(){for(let i=0;i<4;i++)setTimeout(()=>tone(100+i*40,'square',.2,
 function sfxLife(){tone(440,'sine',.08,.08);tone(550,'sine',.1,.08);}
 
 // ================================================================
-//  BACKGROUND MUSIC (procedural Web Audio synth)
-// ================================================================
-let musicNodes=[], musicPlaying=false, musicBeat=0, musicInterval=null;
-
-const MUSIC_NOTES={
-  // scale: A minor pentatonic (A C D E G)
-  bass:[110,130.8,146.8,164.8,196],
-  lead:[220,261.6,293.6,329.6,392,440,523.2],
-};
-// chord progressions per wave feel
-const BASS_PATTERNS=[
-  [0,0,2,1],[0,3,1,2],[2,0,3,1],[0,2,4,0]
-];
-const LEAD_PATTERNS=[
-  [0,2,4,2],[2,4,5,3],[4,5,6,4],[0,3,5,2]
-];
-
-function musicNote(freq,type,dur,vol,delay=0,dest){
-  try{
-    const ac=getAC();
-    const o=ac.createOscillator(),g=ac.createGain(),now=ac.currentTime+delay;
-    o.connect(g);g.connect(dest||ac.destination);
-    o.type=type;o.frequency.setValueAtTime(freq,now);
-    g.gain.setValueAtTime(0,now);
-    g.gain.linearRampToValueAtTime(vol,now+0.02);
-    g.gain.setValueAtTime(vol,now+dur*0.7);
-    g.gain.exponentialRampToValueAtTime(0.001,now+dur);
-    o.start(now);o.stop(now+dur+0.05);
-    musicNodes.push(o,g);
-  }catch(e){}
-}
-
-function playMusicBeat(){
-  if(!musicPlaying||gameState!=='playing')return;
-  try{
-    const ac=getAC();
-    // Master gain for music
-    if(!window._musicGain){
-      window._musicGain=ac.createGain();
-      window._musicGain.gain.value=0.12;
-      window._musicGain.connect(ac.destination);
-    }
-    const dest=window._musicGain;
-    const bpm=Math.min(160,80+wave*12); // speeds up each wave
-    const beatDur=60/bpm;
-    const pat=BASS_PATTERNS[musicBeat%BASS_PATTERNS.length];
-    const lpat=LEAD_PATTERNS[musicBeat%LEAD_PATTERNS.length];
-
-    // Bass pulse every beat
-    const bassFreq=MUSIC_NOTES.bass[pat[musicBeat%4]];
-    musicNote(bassFreq,'square',beatDur*.45,.18,0,dest);
-
-    // Sub bass
-    musicNote(bassFreq/2,'sine',beatDur*.9,.12,0,dest);
-
-    // Lead melody every 2 beats
-    if(musicBeat%2===0){
-      const lf=MUSIC_NOTES.lead[lpat[(musicBeat/2)%4]];
-      musicNote(lf,'triangle',beatDur*.55,.09,beatDur*.1,dest);
-      // harmony
-      musicNote(lf*1.5,'sine',beatDur*.4,.04,beatDur*.15,dest);
-    }
-
-    // Percussion (noise burst on beats 1 & 3)
-    if(musicBeat%4===0||musicBeat%4===2){
-      try{
-        const buf=ac.createBuffer(1,ac.sampleRate*.04,ac.sampleRate);
-        const d=buf.getChannelData(0);
-        for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
-        const src=ac.createBufferSource(),ng=ac.createGain();
-        src.buffer=buf;src.connect(ng);ng.connect(dest);
-        ng.gain.value=musicBeat%4===0?.14:.07;
-        src.start(ac.currentTime);
-        musicNodes.push(src,ng);
-      }catch(e){}
-    }
-
-    musicBeat++;
-    // Clean up old nodes
-    if(musicNodes.length>80)musicNodes.splice(0,40);
-  }catch(e){}
-}
-
-function startMusic(){
-  if(musicPlaying)return;
-  musicPlaying=true;musicBeat=0;
-  try{getAC().resume();}catch(e){}
-  const bpm=Math.min(160,80+wave*12);
-  const beatMs=60000/bpm;
-  playMusicBeat();
-  musicInterval=setInterval(()=>{
-    if(!musicPlaying){clearInterval(musicInterval);return;}
-    // Sync tempo to current wave
-    const newBpm=Math.min(160,80+wave*12);
-    const newMs=60000/newBpm;
-    if(Math.abs(newMs-beatMs)>50){stopMusic();startMusic();return;}
-    playMusicBeat();
-  },beatMs);
-}
-
-function stopMusic(){
-  musicPlaying=false;
-  if(musicInterval){clearInterval(musicInterval);musicInterval=null;}
-  musicNodes.forEach(n=>{try{n.disconnect();}catch(e){}});
-  musicNodes=[];
-}
-
-// ================================================================
 //  STATE
 // ================================================================
 let gameState='start';
@@ -437,7 +329,7 @@ let powerupMeter=0,shieldActive=false,shieldTimer=0;
 let keys={},animId,waveAnnounceTimer=0,totalWavesCleared=0;
 let paused=false,bossActive=false,waveTransitioning=false;
 let weaponLevel=1;
-let bullets=[],chickens=[],eggs=[],particles=[],powerups=[],explosions=[],feathers=[],floatingTexts=[];
+let bullets=[],chickens=[],eggs=[],particles=[],powerups=[],explosions=[],floatingTexts=[];
 let boss=null,screenShake=0;
 
 // Star layers
@@ -532,13 +424,15 @@ function drawChickenSprite(c2,type,w,hitFlash,hpRatio){
 
   c2.filter='none';
 
-  // HP bar (above sprite)
-  if(hpRatio<1){
-    const bw=w*1.2,bh=4;
-    c2.fillStyle='rgba(0,0,0,.6)';c2.fillRect(-bw/2,17*s,bw,bh);
-    c2.fillStyle=hpRatio>.6?'#44ff44':hpRatio>.3?'#ffcc00':'#ff4444';
-    c2.fillRect(-bw/2,17*s,bw*hpRatio,bh);
-  }
+  // HP bar — always visible, above the sprite
+  const bw=w*1.3, bh=5;
+  const barY = -26*s; // above head
+  c2.fillStyle='rgba(0,0,0,.7)';c2.fillRect(-bw/2, barY, bw, bh);
+  c2.fillStyle=hpRatio>.6?'#44ff44':hpRatio>.3?'#ffcc00':'#ff4444';
+  c2.fillRect(-bw/2, barY, bw*hpRatio, bh);
+  // border
+  c2.strokeStyle='rgba(255,255,255,.3)';c2.lineWidth=0.5;
+  c2.strokeRect(-bw/2, barY, bw, bh);
 }
 
 function drawChicken(ch){
@@ -592,43 +486,6 @@ function drawBoss(){
 }
 
 // ================================================================
-//  FEATHERS
-// ================================================================
-const FCOLS=['#e8c87a','#c8a850','#ffffff','#ff9944','#cc2200','#ffeeaa'];
-function spawnFeathers(x,y,type){
-  const n=type==='boss'?20:type==='tank'?12:8; // reduced counts
-  // Hard cap: max 60 feathers total at any time
-  if(feathers.length>52) feathers.splice(0, feathers.length-52);
-  for(let i=0;i<n;i++){
-    const a=Math.random()*Math.PI*2,sp=1.5+Math.random()*5;
-    feathers.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,rot:Math.random()*Math.PI*2,rotV:(Math.random()-.5)*.28,len:4+Math.random()*10,color:FCOLS[Math.floor(Math.random()*FCOLS.length)],alpha:1,gravity:.1});
-  }
-}
-function drawFeathers(){
-  // No save/restore per feather — manual transform with setTransform
-  for(const f of feathers){
-    if(f.alpha<0.05) continue;
-    const cos=Math.cos(f.rot),sin=Math.sin(f.rot);
-    ctx.globalAlpha=f.alpha;
-    ctx.strokeStyle=f.color;ctx.lineWidth=1.8;ctx.lineCap='round';
-    // spine
-    ctx.beginPath();
-    ctx.moveTo(f.x-cos*f.len, f.y-sin*f.len);
-    ctx.lineTo(f.x+cos*f.len, f.y+sin*f.len);
-    ctx.stroke();
-    // 3 barb pairs only (not a loop)
-    const steps=[-f.len*.5, 0, f.len*.5];
-    for(const t of steps){
-      const bx=f.x+cos*t, by=f.y+sin*t;
-      const bl=f.len*.38*(1-Math.abs(t)/f.len+.5);
-      ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx-sin*bl,by+cos*bl);ctx.stroke();
-      ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(bx+sin*bl,by-cos*bl);ctx.stroke();
-    }
-  }
-  ctx.globalAlpha=1;
-}
-
-// ================================================================
 //  WAVE / CHICKEN CREATION
 // ================================================================
 const WAVE_CONFIGS=[
@@ -640,7 +497,7 @@ const WAVE_CONFIGS=[
 ];
 
 function createWave(n){
-  chickens=[];eggs=[];boss=null;bossActive=false;feathers=[];
+  chickens=[];eggs=[];boss=null;bossActive=false;
   document.getElementById('boss-hp-bar').style.display='none';
   const cfg=WAVE_CONFIGS[Math.min(n-1,WAVE_CONFIGS.length-1)];
   if(cfg.pattern==='boss'){spawnBoss();return;}
@@ -708,7 +565,7 @@ function killChicken(ch){
   score+=Math.floor(ch.points*mult);
   document.getElementById('hud-score').textContent=score.toLocaleString();
   sfxPuku();
-  spawnFeathers(ch.x,ch.y,ch.type);
+  
   burst(ch.x,ch.y,'#ffe066',8);
   explosions.push({x:ch.x,y:ch.y,r:0,maxR:38,alpha:1});
   spawnPowerup(ch.x,ch.y);
@@ -722,7 +579,7 @@ function killBoss(){
   boss.active=false;
   for(let i=0;i<10;i++)setTimeout(()=>{
     const bx=boss.x+Math.random()*130-65,by=boss.y+Math.random()*90-45;
-    burst(bx,by,'#ff8800',14);spawnFeathers(bx,by,'boss');
+    burst(bx,by,'#ff8800',14);
     explosions.push({x:bx,y:by,r:0,maxR:90,alpha:1});sfxPuku();
   },i*160);
   score+=15000;
@@ -961,8 +818,20 @@ function update(){
     if(!b.active)continue;b.x+=b.vx;b.y+=b.vy;
     if(b.y<-20||b.x<-20||b.x>W+20||b.y>H+20){b.active=false;continue;}
     if(b.fromPlayer){
-      for(const ch of chickens){if(!ch.active)continue;if(b.x>ch.x-ch.w/2-4&&b.x<ch.x+ch.w/2+4&&b.y>ch.y-ch.h/2-4&&b.y<ch.y+ch.h/2+4){b.active=false;ch.hp--;ch.hitFlash=8;sfxHit();for(let i=0;i<3;i++){const a=Math.random()*Math.PI*2,sp=1+Math.random()*2;feathers.push({x:ch.x,y:ch.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-.5,rot:Math.random()*Math.PI,rotV:(Math.random()-.5)*.2,len:3+Math.random()*5,color:'#e8c87a',alpha:.8,gravity:.08});}if(ch.hp<=0)killChicken(ch);break;}}
-      if(boss&&boss.active&&Math.abs(b.x-boss.x)<boss.w/2&&Math.abs(b.y-boss.y)<boss.h/2){b.active=false;boss.hp--;boss.hitFlash=6;sfxBossHit();updateBossHP();if(boss.hp<=0)killBoss();}
+      // vs chickens
+      for(const ch of chickens){
+        if(!ch.active)continue;
+        if(b.x>ch.x-ch.w/2-4&&b.x<ch.x+ch.w/2+4&&b.y>ch.y-ch.h/2-6&&b.y<ch.y+ch.h/2+6){
+          b.active=false;
+          ch.hp--;
+          ch.hitFlash=8;
+          sfxHit();
+          if(ch.hp<=0) killChicken(ch);
+          break;
+        }
+      }
+      // vs boss
+      if(b.active&&boss&&boss.active&&Math.abs(b.x-boss.x)<boss.w/2&&Math.abs(b.y-boss.y)<boss.h/2){b.active=false;boss.hp--;boss.hitFlash=6;sfxBossHit();updateBossHP();if(boss.hp<=0)killBoss();}
     }
     if(!b.fromPlayer&&!player.invincible&&Math.abs(b.x-player.x)<22&&Math.abs(b.y-player.y)<26){b.active=false;if(shieldActive){burst(player.x,player.y,'#60dfff',10);}else{lives--;player.invincible=90;combo=0;updateComboDisplay();burst(player.x,player.y,'#ff4444',12);updateLivesHUD();sfxLife();screenShake=10;if(lives<=0){setTimeout(endGame,400);return;}}}
   }
@@ -992,10 +861,6 @@ function update(){
   let fi2=0;
   for(let i=0;i<floatingTexts.length;i++){const ft=floatingTexts[i];ft.y+=ft.vy;ft.alpha-=.018;if(ft.alpha>.02)floatingTexts[fi2++]=ft;}
   floatingTexts.length=fi2;
-  // feathers
-  let fhi=0;
-  for(let i=0;i<feathers.length;i++){const f=feathers[i];f.x+=f.vx;f.y+=f.vy;f.vy+=f.gravity;f.vx*=.97;f.rot+=f.rotV;f.alpha-=.016;if(f.alpha>.02)feathers[fhi++]=f;}
-  feathers.length=fhi;
   if(screenShake>0)screenShake--;
   if(waveAnnounceTimer>0){waveAnnounceTimer--;if(waveAnnounceTimer===0)document.getElementById('wave-announce').classList.remove('show');}
   // fast bullet/egg/powerup compaction
@@ -1042,7 +907,7 @@ function gameLoop(){
   if(paused){animId=requestAnimationFrame(gameLoop);return;}
   ctx.save();
   if(screenShake>0)ctx.translate(Math.random()*screenShake*2-screenShake,Math.random()*screenShake*2-screenShake);
-  drawBackground();drawExplosions();drawFeathers();
+  drawBackground();drawExplosions();
   chickens.filter(c=>c.active).forEach(drawChicken);
   if(boss&&boss.active)drawBoss();
   eggs.filter(e=>e.active).forEach(drawEgg);
@@ -1060,26 +925,26 @@ function startGame(){
   score=0;wave=1;lives=3;bombs=3;combo=0;powerupMeter=0;totalWavesCleared=0;waveTransitioning=false;weaponLevel=1;updateWeaponHUD();
   shieldActive=false;shieldTimer=0;bossActive=false;boss=null;
   player.x=W/2;player.y=H-140;player.invincible=0;
-  bullets=[];eggs=[];particles=[];powerups=[];explosions=[];floatingTexts=[];feathers=[];
+  bullets=[];eggs=[];particles=[];powerups=[];explosions=[];floatingTexts=[];
   document.getElementById('hud-score').textContent='0';document.getElementById('hud-wave').textContent='1';
   document.getElementById('powerup-fill').style.width='0%';document.getElementById('shield-indicator').classList.remove('active');
   document.getElementById('boss-hp-bar').style.display='none';document.getElementById('pause-btn').style.display='flex';
-  updateLivesHUD();updateBombsHUD();createWave(1);announceWave(1);cancelAnimationFrame(animId);startMusic();gameLoop();
+  updateLivesHUD();updateBombsHUD();createWave(1);announceWave(1);cancelAnimationFrame(animId);gameLoop();
 }
 function endGame(){
-  gameState='gameover';cancelAnimationFrame(animId);stopMusic();saveScore(score);
+  gameState='gameover';cancelAnimationFrame(animId);saveScore(score);
   document.getElementById('final-score').textContent=score.toLocaleString();document.getElementById('waves-cleared').textContent=totalWavesCleared;document.getElementById('go-best').textContent=getBest().toLocaleString();document.getElementById('pi-earned').textContent=((score/100000)+(totalWavesCleared*.005)).toFixed(3)+' pi';
   document.getElementById('screen-gameover').classList.remove('hidden');document.getElementById('pause-btn').style.display='none';
 }
 function winGame(){
-  gameState='win';cancelAnimationFrame(animId);stopMusic();saveScore(score);
+  gameState='win';cancelAnimationFrame(animId);saveScore(score);
   document.getElementById('win-score').textContent=score.toLocaleString();document.getElementById('pi-win-earned').textContent=((score/80000)+(MAX_WAVES*.01)).toFixed(3)+' pi';
   document.getElementById('screen-win').classList.remove('hidden');document.getElementById('pause-btn').style.display='none';
 }
-function togglePause(){if(gameState!=='playing')return;paused=!paused;document.getElementById('pause-btn').textContent=paused?'GO':'||';if(paused){stopMusic();document.getElementById('screen-pause').classList.remove('hidden');}else{startMusic();document.getElementById('screen-pause').classList.add('hidden');}}
+function togglePause(){if(gameState!=='playing')return;paused=!paused;document.getElementById('pause-btn').textContent=paused?'GO':'||';if(paused){document.getElementById('screen-pause').classList.remove('hidden');}else{document.getElementById('screen-pause').classList.add('hidden');}}
 function hideAllScreens(){document.querySelectorAll('.screen').forEach(s=>s.classList.add('hidden'));}
 function showScreen(id){hideAllScreens();if(id==='screen-leaderboard')renderLeaderboard();document.getElementById(id).classList.remove('hidden');}
-function showStart(){gameState='start';paused=false;cancelAnimationFrame(animId);stopMusic();hideAllScreens();document.getElementById('screen-start').classList.remove('hidden');document.getElementById('pause-btn').style.display='none';const b=getBest();if(b>0){document.getElementById('hs-preview').style.display='block';document.getElementById('hs-preview-val').textContent=b.toLocaleString();}drawBackground();drawTitleChicken();}
+function showStart(){gameState='start';paused=false;cancelAnimationFrame(animId);hideAllScreens();document.getElementById('screen-start').classList.remove('hidden');document.getElementById('pause-btn').style.display='none';const b=getBest();if(b>0){document.getElementById('hs-preview').style.display='block';document.getElementById('hs-preview-val').textContent=b.toLocaleString();}drawBackground();drawTitleChicken();}
 
 // Title screen chicken preview
 function drawTitleChicken(){
